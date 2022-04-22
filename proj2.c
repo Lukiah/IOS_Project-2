@@ -5,5 +5,6 @@
 
 main() {
 
-//pls
+    printf("Hello world");
+
 }
