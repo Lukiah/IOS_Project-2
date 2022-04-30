@@ -12,7 +12,7 @@
 
 
 sem_t *mutex;
-sem_t *printSem;
+sem_t *printSem; // write to file semaphore
 FILE *fOut; // proj2.out pointer
 int lineNum = 1;
 
@@ -39,13 +39,20 @@ void flushPrint (const char * format, ...)
     sem_post(printSem); // free the mutex for other processes to write to file
 }
 
+/*
+srand pro kazdy proces aby meli fakt random cisla:
+srand(time(NULL) * getpid());
+usleep po vytvoreni:
+usleep(1000 * (rand() % (TI + 1)));
+*/
+
 void oFc(int oNum){
-    //TODO rest of oxygen business
+    //TODO rest of oxygen business + randomizer
     flushPrint("O %d: ",oNum); // '-O-oNum:-' 
 }
 
 void hFc(int hNum){
-    //TODO rest of hydrogen business
+    //TODO rest of hydrogen business + randomizer
     flushPrint("H %d: ",hNum); // '-H-hNum:-'
 }
 
@@ -111,9 +118,9 @@ int main(int argc, char *argv[]){
         }
     }
 
-    //while(wait(NULL) > 0);
+    while(wait(NULL) > 0);
     //trash(); //after all child processes are done
-
+    fclose(fOut);
 
 
 }
