@@ -55,14 +55,20 @@ void semaphoresInit(){
 
 }
 
-void semaphoresDstr(){ //destroy semaphore
+void trash(){ 
+    //semaphore destroying section
     sem_close(baseMutex);
     sem_unlink("/xzedek03_baseMutex");
     sem_close(printSem);
     sem_unlink("/xzedek03_printSem");
     //sem_close(another_semaphore);
     //sem_unlink(name_of_another_semaphore);
+
+
+    //memory unmapping section
     munmap(lineNum, sizeof(*lineNum));
+    munmap(hydroLeft, sizeof(*hydroLeft));
+    munmap(oxyLeft, sizeof(*oxyLeft));
 }
 
 void flushPrint (char * text, ...) //TODO přepsat stdout na fOut v teto funkci a všude jinde v kódu
@@ -163,9 +169,10 @@ int main(int argc, char *argv[]){
         }
     }
 
-    while(wait(NULL) > 0);
-    //trash(); //after all child processes are done
-    semaphoresDstr();
+    while(wait(NULL) > 0); //main process waits until all child processes are done
+    printf("Parent: 'All the bastards are done. Finally, I can rest.'\n");
+
+    trash();
     fclose(fOut);
 
 }
