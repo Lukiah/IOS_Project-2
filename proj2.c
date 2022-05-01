@@ -7,23 +7,36 @@
 #include <semaphore.h> 
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/mman.h>
 
 
-sem_t *mutex;
+sem_t *baseMutex;
 sem_t *printSem; // write to file semaphore
 FILE *fOut; // proj2.out pointer
-int lineNum = 1;
+int *lineNum;
 
-void semaphoreInit(){ //initializes a singular semaphore 
-    mutex = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0);
-    sem_init(mutex,1,1);
+void semaphoresInit(){
+    lineNum = mmap(NULL, sizeof(*lineNum), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0); // sh mem creation
+    if (lineNum == MAP_FAILED){
+        fprintf(stderr, "Attempt to memory map has failed.");
+        exit(1);
+    }
+
+    baseMutex = sem_open("/xzedek03_baseMutex", O_CREAT | O_EXCL, 0666, 0);
+    if (baseMutex == SEM_FAILED){ // failed to initialize
+        fprintf(stderr, "Attempt to initialize a semaphore has failed.");
+        exit(1);
+    }
 }
 
-void semaphoreDstr(void *shMem){ //destroy semaphore
-    sem_destroy(mutex);
-    munmap(shMem, sizeof(sem_t));
+void semaphoresDstr(){ //destroy semaphore
+    sem_close(baseMutex);
+    sem_unlink("/xzedek03_sem_mutex");
+    //sem_close(another_semaphore);
+    //sem_unlink(name_of_another_semaphore);
+    munmap(lineNum, sizeof(*lineNum));
 }
 
 void flushPrint (const char * format, ...)
@@ -31,9 +44,9 @@ void flushPrint (const char * format, ...)
     sem_wait(printSem); // wait until noone else is writing into file
     va_list args;
     va_start (args, format);
-    fprintf(fOut, "%d: ",lineNum); //'lineNum:-'
+    fprintf(fOut, "%d: ",(*lineNum)); //'lineNum: '
     vfprintf (fOut, format, args);
-    lineNum++;
+    (*lineNum)++;
     fflush(fOut);
     va_end (args);
     sem_post(printSem); // free the mutex for other processes to write to file
@@ -47,13 +60,13 @@ usleep(1000 * (rand() % (TI + 1)));
 */
 
 void oFc(int oNum){
-    //TODO rest of oxygen business + randomizer
-    flushPrint("O %d: ",oNum); // '-O-oNum:-' 
+    
+    flushPrint("O %d: ",oNum); // ' O oNum: ' 
 }
 
 void hFc(int hNum){
     //TODO rest of hydrogen business + randomizer
-    flushPrint("H %d: ",hNum); // '-H-hNum:-'
+    flushPrint("H %d: ",hNum); // ' H hNum: '
 }
 
 void trash(); //cleans up leftover processes TODO
@@ -77,43 +90,41 @@ int main(int argc, char *argv[]){
             else
             {
                 fprintf(stdout, "timer parameters outside of allowed range\n"); //errcode for n0 <= TI/TB <= 1000
-                return 1;    
+                exit(1);    
             }
         }
         else
         {
             fprintf(stderr, "negative arguments entered\n"); //errcode for nO/nH <= 0
-            return 1; 
+            exit(1); 
         }
     } 
     else
     {
         fprintf(stderr, "invalid amount of parameters\n"); //errcode for argc != 5
-        return 1;
+        exit(1);
     }
 
     // opens(creates) file or prints on stderr if an error occurs
     if ((fOut = fopen("proj2.out", "w")) == NULL){ 
         fprintf(stderr, "An error has occured while opening proj2.out file\n");
-        return 1;
+        exit(1);
     }
+
+    semaphoresInit();
 
     for (int i = 1; i <= nH; i++){ // Hydrogen processes creator
         pid_t id = fork();
-        if(id == 0){ //then successor/child process
-            sem_wait(mutex);
+        if(id == 0){ //== successor/child process
             hFc(i);
-            sem_post(mutex);
             exit(0);
         }
     }
 
     for (int i = 1; i <= nO; i++){ // Oxygen processes creator
         pid_t id = fork();
-        if(id == 0){ //then successor/child process
-            sem_wait(mutex);
+        if(id == 0){ //== successor/child process
             oFc(i);
-            sem_post(mutex);
             exit(0);
         }
     }
@@ -122,5 +133,6 @@ int main(int argc, char *argv[]){
     //trash(); //after all child processes are done
     fclose(fOut);
 
+    semaphoresDstr(lineNum);
 
 }
