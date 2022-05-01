@@ -11,69 +11,100 @@
 #include <string.h>
 #include <sys/mman.h>
 
+// $ ./proj2 NO NH TI TB
+
 
 sem_t *baseMutex;
 sem_t *printSem; // write to file semaphore
 FILE *fOut; // proj2.out pointer
 int *lineNum;
+int *hydroLeft, *oxyLeft;
 
 void semaphoresInit(){
-    lineNum = mmap(NULL, sizeof(*lineNum), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0); // sh mem creation
+    lineNum = mmap(NULL, sizeof(*lineNum), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0); // lineNum is now a shared memory variable
     if (lineNum == MAP_FAILED){
-        fprintf(stderr, "Attempt to memory map has failed.");
+        fprintf(stderr, "An attempt to map memory has failed.");
+        exit(1);
+    }
+    (*lineNum) = 1;
+
+    hydroLeft = mmap(NULL, sizeof(*hydroLeft), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0); // lineNum is now a shared memory variable
+    if (hydroLeft == MAP_FAILED){
+        fprintf(stderr, "An attempt to map memory has failed.");
         exit(1);
     }
 
-    baseMutex = sem_open("/xzedek03_baseMutex", O_CREAT | O_EXCL, 0666, 0);
-    if (baseMutex == SEM_FAILED){ // failed to initialize
-        fprintf(stderr, "Attempt to initialize a semaphore has failed.");
+    oxyLeft = mmap(NULL, sizeof(*oxyLeft), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0); // lineNum is now a shared memory variable
+    if (oxyLeft == MAP_FAILED){
+        fprintf(stderr, "An attempt to map memory has failed.");
         exit(1);
     }
+
+    baseMutex = sem_open("/xzedek03_baseMutex", O_CREAT | O_EXCL, 0666, 1);
+    if (baseMutex == SEM_FAILED){ // failed to initialize
+        fprintf(stderr, "An attempt to initialize a semaphore has failed.\n");
+        exit(1);
+    }
+
+    printSem = sem_open("/xzedek03_printSem", O_CREAT | O_EXCL, 0666, 1);
+    if (printSem == SEM_FAILED){ // failed to initialize
+        fprintf(stderr, "An attempt to initialize a semaphore has failed.\n");
+        exit(1);
+    }
+
+
 }
 
 void semaphoresDstr(){ //destroy semaphore
     sem_close(baseMutex);
-    sem_unlink("/xzedek03_sem_mutex");
+    sem_unlink("/xzedek03_baseMutex");
+    sem_close(printSem);
+    sem_unlink("/xzedek03_printSem");
     //sem_close(another_semaphore);
     //sem_unlink(name_of_another_semaphore);
     munmap(lineNum, sizeof(*lineNum));
 }
 
-void flushPrint (const char * format, ...)
+void flushPrint (char * text, ...) //TODO přepsat stdout na fOut v teto funkci a všude jinde v kódu
 {
     sem_wait(printSem); // wait until noone else is writing into file
     va_list args;
-    va_start (args, format);
-    fprintf(fOut, "%d: ",(*lineNum)); //'lineNum: '
-    vfprintf (fOut, format, args);
+    va_start (args, text);
+    fprintf(stdout, "%d: ",(*lineNum)); //'lineNum: '
     (*lineNum)++;
-    fflush(fOut);
+    vfprintf(stdout, text, args);
+    fflush(stdout);
     va_end (args);
     sem_post(printSem); // free the mutex for other processes to write to file
 }
 
-/*
-srand pro kazdy proces aby meli fakt random cisla:
-srand(time(NULL) * getpid());
-usleep po vytvoreni:
-usleep(1000 * (rand() % (TI + 1)));
-*/
-
-void oFc(int oNum){
-    
-    flushPrint("O %d: ",oNum); // ' O oNum: ' 
+void hFc(int hNum, int TI){
+    srand(time(NULL) * getpid());
+    srand(time(NULL) * getpid());
+    flushPrint("H %d: started\n",hNum);
+    usleep(1000 * (rand() % (TI + 1)));
+    flushPrint("H %d: going to queue\n",hNum);
+    //Hydrogen queue implementation TODO (possibly as Semaphore(0))
+    //barrier waits for 2 of Hydrogen
 }
 
-void hFc(int hNum){
-    //TODO rest of hydrogen business + randomizer
-    flushPrint("H %d: ",hNum); // ' H hNum: '
+void oFc(int oNum, int TI){   
+    srand(time(NULL) * getpid());
+    srand(time(NULL) * getpid());
+    flushPrint("O %d: started\n",oNum);
+    usleep(1000 * (rand() % (TI + 1))); // TI + 1 so that max value is TI, since modulo "takes that possibility away"
+    flushPrint("O %d: going to queue\n",oNum);
+    //Oxygen queue implementation TODO possibly as Semaphore(0)
+    //barrier waits for 1 of Oxygen
 }
 
 void trash(); //cleans up leftover processes TODO
 
 int main(int argc, char *argv[]){
-    int nH = 0,nO = 0, tI, tB;
+    int nH = 0, nO = 0, tI, tB;
     
+    //semaphoresDstr(lineNum); //semaphores failing to initialize <- hotfix
+
     if (argc == 5)
     {
         nO = atoi(argv[1]);
@@ -95,7 +126,7 @@ int main(int argc, char *argv[]){
         }
         else
         {
-            fprintf(stderr, "negative arguments entered\n"); //errcode for nO/nH <= 0
+            fprintf(stderr, "negative arguments or arguments equal to zero entered\n"); //errcode for nO/nH <= 0
             exit(1); 
         }
     } 
@@ -113,26 +144,28 @@ int main(int argc, char *argv[]){
 
     semaphoresInit();
 
+    (*hydroLeft) = nH;
+    (*oxyLeft) = nO;
+
     for (int i = 1; i <= nH; i++){ // Hydrogen processes creator
         pid_t id = fork();
         if(id == 0){ //== successor/child process
-            hFc(i);
+            hFc(i,tI);
             exit(0);
         }
     }
-
+    
     for (int i = 1; i <= nO; i++){ // Oxygen processes creator
         pid_t id = fork();
         if(id == 0){ //== successor/child process
-            oFc(i);
+            oFc(i,tI);
             exit(0);
         }
     }
 
     while(wait(NULL) > 0);
     //trash(); //after all child processes are done
+    semaphoresDstr();
     fclose(fOut);
-
-    semaphoresDstr(lineNum);
 
 }
