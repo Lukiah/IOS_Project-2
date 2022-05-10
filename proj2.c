@@ -150,8 +150,7 @@ void flushPrint (char * text, ...) //TODO change back to fOut
     sem_wait(printSem); // wait until noone else is writing into file
     va_list args;
     va_start (args, text);
-    fprintf(stdout
-    , "%d: ",(*lineNum)); //'lineNum: '
+    fprintf(stdout, "%d: ",(*lineNum)); //'lineNum: '
     (*lineNum)++;
     vfprintf(stdout, text, args);
     fflush(stdout);
@@ -178,6 +177,7 @@ void oFc(int oNum, int TI, int TB){
     } else {
         sem_post(qMutex);
     } 
+    flushPrint("O %d: is stuck here",oNum);
     sem_wait(oQueue);
     //bond()
     if ((*killRemaining)){ //cleanup
@@ -218,17 +218,17 @@ void oFc(int oNum, int TI, int TB){
 
     (*molNum)++;
 
-    if ((*possibleMolecules) + 1 == (*molNum)){ //last molecule
+    if ((*possibleMolecules) == ((*molNum) - 1)){ //last molecule
         (*killRemaining)=1;
-        for(int j = 0; j < (*oxygen); j++){
+        for(int j = -1; j < (*oxygen); j++){
             sem_post(oQueue);
         }
-        for(int k = 0; k < (*hydrogen); k++){
+        for(int k = -1; k < (*hydrogen); k++){
             sem_post(hQueue);
         }
     } 
     sem_post(qMutex); 
-    //return;
+    return;
 }
 
 void hFc(int hNum, int TI){
@@ -239,7 +239,7 @@ void hFc(int hNum, int TI){
     usleep(1000 * (rand() % (TI + 1)));
 
     flushPrint("H %d: going to queue\n",hNum);
-    
+
     sem_wait(qMutex);
     (*hydrogen)++;
     if ((*hydrogen) >= 2 && (*oxygen) >= 1) {
@@ -251,8 +251,10 @@ void hFc(int hNum, int TI){
     } else {
         sem_post(qMutex); 
     }
+    flushPrint("H %d: is stuck here",hNum);
     sem_wait(hQueue); //post this x times for each excess H
-    if ((*killRemaining)){ //cleanup
+    
+    if ((*killRemaining) == 1){ //cleanup
         flushPrint("H %d: not enough O or H\n", hNum);
         sem_post(qMutex);
         return;
@@ -262,7 +264,7 @@ void hFc(int hNum, int TI){
 
     //barrier.wait() START
     sem_wait(barrierMutex);
-    ++(*cnt);
+    (*cnt)++;
     if ((*cnt) == 3){
         sem_wait(turnstile2);
         sem_post(turnstile1);
@@ -275,7 +277,7 @@ void hFc(int hNum, int TI){
     flushPrint("H %d: molecule %d created\n", hNum, (*molNum));
 
     sem_wait(barrierMutex);
-    --(*cnt);
+    (*cnt)--;
     if ((*cnt) == 0){
         sem_wait(turnstile1);
         sem_post(turnstile2);
@@ -285,7 +287,7 @@ void hFc(int hNum, int TI){
     sem_wait(turnstile2);
     sem_post(turnstile2);
     //barrier.wait() END
-    //return;
+    return;
 }
 
 int main(int argc, char *argv[]){
@@ -304,7 +306,16 @@ int main(int argc, char *argv[]){
             if ((tI <= 1000) && (tB <= 1000)) // timer check 
             {   
                 initSequence();
-                (*possibleMolecules)=(((nH / 2) < (nO)) ? (nH / 2) : (nO));;
+                (*possibleMolecules)=(((nH / 2) < (nO)) ? (nH / 2) : (nO));
+                if ((*possibleMolecules) == 0) {
+                    (*killRemaining)=1;
+                    for(int j = 0; j < (*oxygen); j++){
+                        sem_post(oQueue);
+                    }
+                    for(int k = 0; k < (*hydrogen); k++){
+                        sem_post(hQueue);
+                    }
+                }
 
                 if ((fOut = fopen("proj2.out", "w")) == NULL){ 
                     fprintf(stderr, "An error has occured while opening proj2.out file\n");
@@ -326,9 +337,10 @@ int main(int argc, char *argv[]){
                     }
                 }
 
-                while(wait(NULL) > 0); //main process waits until all its child processes are done
+                while (wait(NULL) > 0); //main process waits until all its child processes are done
                 trash();
                 fclose(fOut);
+                return 0;
             }
             else
             {
