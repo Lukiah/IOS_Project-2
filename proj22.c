@@ -27,8 +27,6 @@ int *hydrogen, *oxygen;
 int *cnt;
 int *possibleMolecules;
 int *killRemaining;
-int *NO;
-int *NH;
 
 void initSequence(){
     //shared memory section
@@ -71,28 +69,12 @@ void initSequence(){
         fprintf(stderr, "An attempt to map memory has failed.");
         exit(1);
     }
-    (*possibleMolecules) = 0;
 
     killRemaining = mmap(NULL, sizeof(*killRemaining), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0); // lineNum is now a shared memory variable
     if (killRemaining == MAP_FAILED){
         fprintf(stderr, "An attempt to map memory has failed.");
         exit(1);
     }
-    (*killRemaining) = 0;
-
-    NO = mmap(NULL, sizeof(*NO), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0); // lineNum is now a shared memory variable
-    if (NO == MAP_FAILED){
-        fprintf(stderr, "An attempt to map memory has failed.");
-        exit(1);
-    }
-    (*NO) = 0;
-
-    NH = mmap(NULL, sizeof(*NH), PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0); // lineNum is now a shared memory variable
-    if (NH == MAP_FAILED){
-        fprintf(stderr, "An attempt to map memory has failed.");
-        exit(1);
-    }
-    (*NH) = 0;
 
 
     //semaphore section
@@ -101,7 +83,7 @@ void initSequence(){
         fprintf(stderr, "An attempt to initialize a semaphore has failed.\n");
         exit(1);
     }
-    oQueue = sem_open("/xzedek03_oQueue", O_CREAT | O_EXCL, 0666, 0);
+    oQueue = sem_open("/xzedek03_oQueue", O_CREAT | O_EXCL, 0666, 1);
     if (oQueue == SEM_FAILED){ // failed to initialize
         fprintf(stderr, "An attempt to initialize a semaphore has failed.\n");
         exit(1);
@@ -160,8 +142,6 @@ void trash(){ //cleans up semaphores and shared memory
     munmap(cnt, sizeof(*cnt));
     munmap(possibleMolecules, sizeof(*possibleMolecules));
     munmap(killRemaining, sizeof(*killRemaining));
-    munmap(NO, sizeof(*NO));
-    munmap(NH, sizeof(*NH));
 }
 
 void flushPrint (char * text, ...)
@@ -183,9 +163,7 @@ void oFc(int oNum, int TI, int TB){
     flushPrint("O %d: started\n",oNum);
     usleep(1000 * (rand() % (TI + 1))); // TI + 1 so that max value is TI, since modulo "takes that possibility away"
     flushPrint("O %d: going to queue\n",oNum);
-
     sem_wait(qMutex);
-    
     (*oxygen)++;
     if ((*hydrogen) >= 2){
         sem_post(hQueue);
@@ -197,18 +175,17 @@ void oFc(int oNum, int TI, int TB){
         sem_post(qMutex);
     } 
     sem_wait(oQueue);
+    //bond()
     if ((*killRemaining)){ //cleanup
-        flushPrint("O %d: not enough H\n", oNum);
-        sem_post(qMutex);
+        flushPrint("O: %d: not enough H\n", oNum);
         return;
     }
-    
-    flushPrint("O %d: creating molecule %d\n", oNum, (*molNum)); //bond()
-    usleep(1000 * (rand() % (TB + 1)));
+
+    flushPrint("O: %d: creating molecule %d\n", oNum, (*molNum));
 
     //barrier.wait() START
     sem_wait(barrierMutex);
-    (*cnt)++;
+    (*cnt) += 1;
     if ((*cnt) == 3){
         sem_wait(turnstile2);
         sem_post(turnstile1);
@@ -219,10 +196,11 @@ void oFc(int oNum, int TI, int TB){
     sem_post(turnstile1);
 
     // critical section
-    flushPrint("O %d: molecule %d created\n", oNum, (*molNum));
+    usleep(1000 * (rand() % (TB + 1)));
+    flushPrint("O: %d: molecule %d created\n", oNum, (*molNum));
 
     sem_wait(barrierMutex);
-    (*cnt)--;
+    (*cnt) -= 1;
     if ((*cnt) == 0){
         sem_wait(turnstile1);
         sem_post(turnstile2);
@@ -234,29 +212,23 @@ void oFc(int oNum, int TI, int TB){
     //barrier.wait() END
 
     (*molNum)++;
+    sem_post(qMutex);    
 
-    if ((*possibleMolecules) == ((*molNum) - 1)){ //last molecule
-        (*killRemaining) = 1;
-        for(int j = (*possibleMolecules); j < (*NO); j++){
+    if ((*possibleMolecules)==(*molNum)){ //last molecule
+        (*killRemaining)=1;
+        for(int j = (*oxygen); j > 0; j--){
             sem_post(oQueue);
         }
-        for(int k = (*possibleMolecules)*2; k < (*NH); k++){
-            sem_post(hQueue);
-        }
     } 
-    sem_post(qMutex); 
-    return;
+
 }
 
 void hFc(int hNum, int TI){
     srand(time(NULL) * getpid());
     srand(time(NULL) * getpid());
     flushPrint("H %d: started\n",hNum);
-
     usleep(1000 * (rand() % (TI + 1)));
-
     flushPrint("H %d: going to queue\n",hNum);
-
     sem_wait(qMutex);
     (*hydrogen)++;
     if ((*hydrogen) >= 2 && (*oxygen) >= 1) {
@@ -269,18 +241,16 @@ void hFc(int hNum, int TI){
         sem_post(qMutex); 
     }
     sem_wait(hQueue); //post this x times for each excess H
-    
     if ((*killRemaining)){ //cleanup
-        flushPrint("H %d: not enough O or H\n", hNum);
-        sem_post(qMutex);
+        flushPrint("H: %d: not enough O or H\n", hNum);
         return;
     }
 
-    flushPrint("H %d: creating molecule %d\n", hNum, (*molNum));
+    flushPrint("H: %d: creating molecule %d\n", hNum, (*molNum));
 
     //barrier.wait() START
     sem_wait(barrierMutex);
-    (*cnt)++;
+    (*cnt) += 1;
     if ((*cnt) == 3){
         sem_wait(turnstile2);
         sem_post(turnstile1);
@@ -290,10 +260,10 @@ void hFc(int hNum, int TI){
     sem_wait(turnstile1);
     sem_post(turnstile1);
 
-    flushPrint("H %d: molecule %d created\n", hNum, (*molNum));
+    flushPrint("H: %d: molecule %d created\n", hNum, (*molNum));
 
     sem_wait(barrierMutex);
-    (*cnt)--;
+    (*cnt) -= 1;
     if ((*cnt) == 0){
         sem_wait(turnstile1);
         sem_post(turnstile2);
@@ -303,12 +273,19 @@ void hFc(int hNum, int TI){
     sem_wait(turnstile2);
     sem_post(turnstile2);
     //barrier.wait() END
-    return;
+    if ((*possibleMolecules)==(*molNum)){ //last molecule
+        (*killRemaining)=1;
+        for(int j = (*hydrogen); j > 0; j--){
+            sem_post(hQueue);
+        }
+    } 
 }
 
 int main(int argc, char *argv[]){
     int nH = 0, nO = 0, tI, tB;
+    
     trash();
+
     if (argc == 5)
     {
         nO = atoi(argv[1]);
@@ -321,18 +298,7 @@ int main(int argc, char *argv[]){
             if ((tI <= 1000) && (tB <= 1000)) // timer check 
             {   
                 initSequence();
-                (*NO) = nO;
-                (*NH) = nH;
-                (*possibleMolecules)=(((nH / 2) < (nO)) ? (nH / 2) : (nO));
-                if ((*possibleMolecules) == 0) {
-                    (*killRemaining)=1;
-                    for(int j = (*possibleMolecules); j < (*NO); j++){
-                        sem_post(oQueue);
-                    }
-                    for(int k = (*possibleMolecules)*2; k < (*NH); k++){
-                        sem_post(hQueue);
-                    }
-                }
+                (*possibleMolecules)=(((nH / 2) < (nO)) ? (nH / 2) : (nO));;
 
                 if ((fOut = fopen("proj2.out", "w")) == NULL){ 
                     fprintf(stderr, "An error has occured while opening proj2.out file\n");
@@ -354,10 +320,9 @@ int main(int argc, char *argv[]){
                     }
                 }
 
-                while (wait(NULL) > 0); //main process waits until all its child processes are done
+                while(wait(NULL) > 0); //main process waits until all its child processes are done
                 trash();
                 fclose(fOut);
-                return 0;
             }
             else
             {
